@@ -93,6 +93,21 @@ class CopickPlugin(QWidget):
         self.feature_type_input.setPlaceholderText("Feature Type")
         layout.addWidget(self.feature_type_input)
 
+        # Open Tomogram button
+        self.open_tomogram_button = QPushButton("Open Tomogram")
+        self.open_tomogram_button.clicked.connect(self.open_tomogram)
+        layout.addWidget(self.open_tomogram_button)
+
+        # Open Annotation Segmentation button
+        self.open_annotation_button = QPushButton("Open Annotation Segmentation")
+        self.open_annotation_button.clicked.connect(self.open_annotation)
+        layout.addWidget(self.open_annotation_button)
+
+        # Open Prediction Segmentation button
+        self.open_prediction_button = QPushButton("Open Prediction Segmentation")
+        self.open_prediction_button.clicked.connect(self.open_prediction)
+        layout.addWidget(self.open_prediction_button)
+
         # Generate Features button
         self.generate_features_button = QPushButton("Generate Features")
         self.generate_features_button.clicked.connect(self.call_generate_features)
@@ -108,20 +123,15 @@ class CopickPlugin(QWidget):
         self.run_model_button.clicked.connect(self.call_run_model)
         layout.addWidget(self.run_model_button)
 
-        # Open Tomogram button
-        self.open_tomogram_button = QPushButton("Open Tomogram")
-        self.open_tomogram_button.clicked.connect(self.open_tomogram)
-        layout.addWidget(self.open_tomogram_button)
+        # Train on All Data button
+        self.train_all_button = QPushButton("Train on All Data")
+        self.train_all_button.clicked.connect(self.call_train_all_data)
+        layout.addWidget(self.train_all_button)
 
-        # Open Annotation Segmentation button
-        self.open_annotation_button = QPushButton("Open Annotation Segmentation")
-        self.open_annotation_button.clicked.connect(self.open_annotation)
-        layout.addWidget(self.open_annotation_button)
-
-        # Open Prediction Segmentation button
-        self.open_prediction_button = QPushButton("Open Prediction Segmentation")
-        self.open_prediction_button.clicked.connect(self.open_prediction)
-        layout.addWidget(self.open_prediction_button)
+        # Predict on All Data button
+        self.predict_all_button = QPushButton("Predict on All Data")
+        self.predict_all_button.clicked.connect(self.call_predict_all_data)
+        layout.addWidget(self.predict_all_button)        
 
         # Status Label
         self.status_label = QLabel("Status: Not fetched yet")
@@ -295,6 +305,83 @@ class CopickPlugin(QWidget):
 
     def handle_run_model_response(self, response):
         self.logger.info(f"Run Model Response: {response.status_code} - {response.text}")
+
+    def call_train_all_data(self):
+        """Send request to train model on all available data (no specific run)"""
+        voxel_spacing = self.get_voxel_spacing()
+        session_id = self.session_id
+        user_id = self.user_id_input.text()
+        painting_segmentation_names = self.annotation_input.text()
+
+        if voxel_spacing is None:
+            self.logger.error("Voxel spacing not found. Aborting train_model on all data.")
+            return
+
+        feature_types = self.feature_type_input.text()
+
+        data = {
+            "copick_config_path": "auto-detect",
+            "painting_segmentation_names": painting_segmentation_names,
+            "session_id": session_id,
+            "user_id": user_id,
+            "run_names": "all",
+            "voxel_spacing": float(voxel_spacing),
+            "tomo_type": self.tomo_type_input.text(),
+            "feature_types": feature_types,
+            "eta": 0.3,
+            "gamma": 0.0,
+            "max_depth": 6,
+            "min_child_weight": 1.0,
+            "max_delta_step": 0.0,
+            "subsample": 1.0,
+            "colsample_bytree": 1.0,
+            "reg_lambda": 1.0,
+            "reg_alpha": 0.0,
+            "max_bin": 256,
+            "output_model_path": f"{self.model_input.text()}"
+        }
+
+        self.logger.info(f"Sending train_all_data request to server: {data}")
+
+        try:
+            response = requests.post(f"{self.get_api_url()}/train-all", json=data)
+            self.logger.info(f"Train on All Data Response: {response.status_code} - {response.text}")
+            self.handle_train_model_response(response)
+        except requests.RequestException as e:
+            self.logger.error(f"Error sending train_all_data request: {str(e)}")
+
+    def call_predict_all_data(self):
+        """Send request to predict on all available data (no specific run)"""
+        voxel_spacing = self.get_voxel_spacing()
+        session_id = self.session_id
+        user_id = self.user_id_input.text()
+        model_path = f"{self.model_input.text()}"
+        feature_names = self.feature_type_input.text()
+        segmentation_name = self.prediction_input.text()
+
+        if voxel_spacing is None:
+            self.logger.error("Voxel spacing not found. Aborting predict_all_data.")
+            return
+
+        data = {
+            "copick_config_path": self.get_api_url(),
+            "session_id": session_id,
+            "user_id": user_id,
+            "voxel_spacing": voxel_spacing,
+            "model_path": model_path,
+            "tomo_type": self.tomo_type_input.text(),
+            "feature_names": feature_names,
+            "segmentation_name": segmentation_name
+        }
+
+        self.logger.info(f"Sending predict_all_data request to server: {data}")
+
+        try:
+            response = requests.post(f"{self.get_api_url()}/predict-all", json=data)
+            self.logger.info(f"Predict on All Data Response: {response.status_code} - {response.text}")
+            self.handle_run_model_response(response)
+        except requests.RequestException as e:
+            self.logger.error(f"Error sending predict_all_data request: {str(e)}")
 
     def open_tomogram(self):
         selected_run_id = self.get_selected_run_id()
