@@ -208,7 +208,7 @@ class CopickPlugin(QWidget):
             "edges": True,
             "texture": True,
             "sigma_min": 0.5,
-            "sigma_max": 16.0
+            "sigma_max": 4.0
         }
 
         self.logger.info(f"Sending generate_features request to server: {data}")
