@@ -13,20 +13,29 @@ from napari.utils import DirectLabelColormap
 class MultiSelectComboBox(QComboBox):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setView(QListWidget(self))
-        self.setEditable(True)
+        self.view().setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)  # Ensure scroll bar is always visible
+        self.setEditable(False)  # Disable text editing in the combo box
+
+        # Create the list widget with checkable items
+        self.list_widget = QListWidget()
+        self.setView(self.list_widget)
+
+        # Create a button for clearing selections (optional)
+        self.clear_button = QPushButton("Clear Selections", self)
+        self.clear_button.clicked.connect(self.clear_selections)
+        self.view().setItemWidget(QListWidgetItem(), self.clear_button)
 
     def addItems(self, items):
         for item in items:
             list_item = QListWidgetItem(item)
             list_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             list_item.setCheckState(Qt.Unchecked)
-            self.view().addItem(list_item)
+            self.list_widget.addItem(list_item)
 
     def selectedItems(self):
         selected = []
-        for index in range(self.view().count()):
-            item = self.view().item(index)
+        for index in range(self.list_widget.count()):
+            item = self.list_widget.item(index)
             if item.checkState() == Qt.Checked:
                 selected.append(item.text())
         return selected
@@ -34,8 +43,13 @@ class MultiSelectComboBox(QComboBox):
     def currentText(self):
         return ", ".join(self.selectedItems())
 
+    def clear_selections(self):
+        for index in range(self.list_widget.count()):
+            item = self.list_widget.item(index)
+            item.setCheckState(Qt.Unchecked)
+
 class CellCanvasWidget(QWidget):
-    def __init__(self, viewer=None, copick_config_path="/Users/kharrington/Data/copick/cellcanvas_server/local_sshOverlay_localStatic.json", hostname="localhost", port=8082, parent=None):
+    def __init__(self, viewer=None, copick_config_path="/Volumes/CZII_A/cellcanvas_tutorial/new/cellcanvas_tutorial/dataset_10229_copick.json", hostname="localhost", port=8000, parent=None):
         super().__init__(parent)
         self.viewer = viewer
         self.setWindowTitle("CellCanvas Widget")
@@ -43,6 +57,14 @@ class CellCanvasWidget(QWidget):
         self.port = port
         self.copick_config_path = copick_config_path
         self.layout = QVBoxLayout(self)
+
+        print(f"Checking server connection at http://{self.hostname}:{self.port}")
+        try:
+            response = requests.get(f"http://{self.hostname}:{self.port}/index")
+            print(f"Server response status: {response.status_code}")
+            print(f"Server response content: {response.text[:100]}...")  # Print first 100 characters
+        except Exception as e:
+            print(f"Error connecting to server: {e}")
         
         # Load Copick project
         self.root = copick.from_file(self.copick_config_path)
@@ -166,6 +188,16 @@ class CellCanvasWidget(QWidget):
                 )
                 seg_child.setData(0, Qt.UserRole, segmentation)
             item.addChild(segmentation_item)
+
+            # Add Features item
+            features_item = QTreeWidgetItem(item, ["Features"])
+            for tomogram in voxel_spacing.tomograms:
+                for feature in tomogram.features:
+                    feature_child = QTreeWidgetItem(
+                        features_item, [f"{feature.feature_type} ({tomogram.meta.tomo_type})"]
+                    )
+                    feature_child.setData(0, Qt.UserRole, feature)
+            item.addChild(features_item)
 
     def handle_item_click(self, item, column):
         data = item.data(0, Qt.UserRole)
@@ -454,26 +486,61 @@ class CellCanvasWidget(QWidget):
     def populate_solution_dropdown(self):
         self.solution_dropdown.clear()
         try:
+            print(f"Fetching solutions from http://{self.hostname}:{self.port}/index")
             response = requests.get(f"http://{self.hostname}:{self.port}/index")
+            print(f"Response status: {response.status_code}")
             if response.status_code == 200:
                 index = response.json().get('index', {})
+                print(f"Number of solutions received: {len(index)}")
                 for solution_id, solution_info in index.items():
-                    self.solution_dropdown.addItem(f"{solution_info['catalog']}:{solution_info['group']}:{solution_info['name']}:{solution_info['version']}")
+                    item_text = f"{solution_info['catalog']}:{solution_info['group']}:{solution_info['name']}:{solution_info['version']}"
+                    print(f"Adding solution: {item_text}")
+                    self.solution_dropdown.addItem(item_text)
+            else:
+                print(f"Error response content: {response.text}")
         except Exception as e:
             print(f"Error fetching solutions: {e}")
 
-    def populate_model_dropdown(self, combobox):
+        print(f"Number of items in dropdown after population: {self.solution_dropdown.count()}")
+        
+    def fetch_models(self):
+        """Fetch available models from the server."""
         try:
             response = requests.get(f"http://{self.hostname}:{self.port}/models")
             if response.status_code == 200:
-                model_list = response.json().get('models', [])
-                for model_name in model_list:
-                    combobox.addItem(model_name)
+                data = response.json()
+                models = data.get('models', {})
+                return models
             else:
                 print(f"Failed to fetch models. Status code: {response.status_code}")
+                return {}
         except Exception as e:
             print(f"Error fetching models: {e}")
-            
+            return {}
+
+    def populate_model_dropdown(self, combobox):
+        models = self.fetch_models()
+        combobox.clear()
+        for model_path, model_info in models.items():
+            combobox.addItem(f"{model_path} ({model_info['catalog']}:{model_info['group']}:{model_info['name']}:{model_info['version']})")
+
+
+    def fetch_user_and_session_ids(self):
+        """Fetch user_id and session_id from the server."""
+        try:
+            response = requests.get(f"http://{self.hostname}:{self.port}/user_session_ids")
+            if response.status_code == 200:
+                data = response.json()
+                user_ids = data.get('user_ids', [])
+                session_ids = data.get('session_ids', [])
+                return user_ids, session_ids
+            else:
+                print(f"Failed to fetch user and session IDs. Status code: {response.status_code}")
+                return [], []
+        except Exception as e:
+            print(f"Error fetching user and session IDs: {e}")
+            return [], []
+
     def update_solution_args(self):
         # Clear existing widgets
         for i in reversed(range(self.scroll_layout.count())): 
@@ -486,7 +553,7 @@ class CellCanvasWidget(QWidget):
         selected_solution = self.solution_dropdown.currentText()
 
         default_value = ""
-        
+
         if not selected_solution:
             return
 
@@ -501,6 +568,9 @@ class CellCanvasWidget(QWidget):
                 "generate-torch-basic-features": ["feature_type"],
             }
         }
+
+        # Fetch user_id and session_id from the server
+        user_ids, session_ids = self.fetch_user_and_session_ids()
 
         try:
             response = requests.get(f"http://{self.hostname}:{self.port}/info/{catalog}/{group}/{name}/{version}")
@@ -542,31 +612,15 @@ class CellCanvasWidget(QWidget):
                             for voxel_spacing in run.voxel_spacings:
                                 for tomogram in voxel_spacing.tomograms:
                                     for feature in tomogram.features:
-                                        field.addItem(feature.meta.name)
-                        elif arg_name == 'painting_segmentation_names':
-                            field = MultiSelectComboBox()
-                            run = self.root.get_run(selected_run)
-                            for voxel_spacing in run.voxel_spacings:
-                                for segmentation in voxel_spacing.run.get_segmentations(voxel_spacing.meta.voxel_size):
-                                    field.addItem(segmentation.meta.name)
-                        elif arg_name in ['train_run_names', 'val_run_names', 'run_names']:
-                            field = MultiSelectComboBox()
-                            for run in self.root.runs:
-                                field.addItem(run.meta.name)
-                        elif arg_name == 'feature_types':
-                            field = MultiSelectComboBox()
-                            run = self.root.get_run(selected_run)
-                            for voxel_spacing in run.voxel_spacings:
-                                for tomogram in voxel_spacing.tomograms:
-                                    for feature in tomogram.features:
-                                        field.addItem(feature.meta.name)
-                        elif arg_name in ['user_id', 'session_id']:
+                                        field.addItem(feature.feature_type)
+                        elif arg_name in ['user_id']:
                             field = QComboBox()
-                            for pick in self.root.runs[0].picks:  # Assuming all runs have similar user_ids and session_ids
-                                if arg_name == 'user_id':
-                                    field.addItem(pick.meta.user_id)
-                                elif arg_name == 'session_id':
-                                    field.addItem(pick.meta.session_id)
+                            for user_id in user_ids:
+                                field.addItem(user_id)
+                        elif arg_name in ['session_id']:
+                            field = QComboBox()
+                            for session_id in session_ids:
+                                field.addItem(session_id)
                         elif arg_name == 'model_path':
                             field = QComboBox()
                             self.populate_model_dropdown(field)
@@ -579,13 +633,13 @@ class CellCanvasWidget(QWidget):
                         else:
                             field = QLineEdit(str(default_value))
 
-                    self.scroll_layout.addRow(label, field)
+                        self.scroll_layout.addRow(label, field)
 
-                # Ensure the widgets are updated to avoid event filter issues
-                self.scroll_content.update()
+                    # Ensure the widgets are updated to avoid event filter issues
+                    self.scroll_content.update()
         except Exception as e:
             print(f"Error updating solution args: {e}")
-            
+
     def run_solution(self):
         selected_solution = self.solution_dropdown.currentText()
         if not selected_solution:
