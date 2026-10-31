@@ -5,15 +5,9 @@ from unittest.mock import Mock
 import pytest
 import requests
 from npe2 import PluginManager, PluginManifest
-from qtpy.QtWidgets import QApplication
 
 from napari_cellcanvas.widget import CellCanvasWidget
 import napari_cellcanvas.widget as widget_module
-
-
-@pytest.fixture(scope="session")
-def app():
-    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture(autouse=True)
