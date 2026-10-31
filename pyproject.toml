@@ -27,6 +27,7 @@ dependencies = [
     "numpy>=2",
     "napari>=0.9,<1",
     "qtpy>=2.4",
+    "superqt>=0.7",
     "requests>=2.31",
     "zarr>=2.16,<4",
 ]

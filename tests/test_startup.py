@@ -70,6 +70,8 @@ def test_empty_startup_does_not_import_copick(app, monkeypatch):
     assert result.run_dropdown.count() == result.solution_dropdown.count() == 0
     assert not result.run_button.isEnabled()
     assert not result.refresh_solutions_button.isEnabled()
+    assert not result.local_controls.train_button.isEnabled()
+    assert not result.local_controls.predict_button.isEnabled()
     importer.assert_not_called()
     result.close()
 
