@@ -53,7 +53,7 @@ class SolutionClient:
 
     def solutions(self):
         response = self._request("GET", "/index")
-        index = response.get("index") if isinstance(response, dict) else None
+        index = response.get("index", {}) if isinstance(response, dict) else None
         if not isinstance(index, dict):
             raise ServerError("Server index must be an object")
         result = []
@@ -68,15 +68,15 @@ class SolutionClient:
 
     def models(self):
         response = self._request("GET", "/models")
-        models = response.get("models") if isinstance(response, dict) else None
+        models = response.get("models", []) if isinstance(response, dict) else None
         if not isinstance(models, list) or not all(isinstance(model, str) for model in models):
             raise ServerError("Server models must be a list of names")
         return models
 
     def arguments(self, solution):
         response = self._request("GET", "/info/" + self._solution_path(solution))
-        info = response.get("info") if isinstance(response, dict) else None
-        args = info.get("args") if isinstance(info, dict) else None
+        info = response.get("info", {}) if isinstance(response, dict) else None
+        args = info.get("args", []) if isinstance(info, dict) else None
         if not isinstance(args, list) or not all(
             isinstance(arg, dict) and isinstance(arg.get("name"), str) and arg["name"]
             for arg in args

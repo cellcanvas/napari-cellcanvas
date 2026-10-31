@@ -114,6 +114,16 @@ def test_existing_protocol_and_execution_result_are_preserved(server):
     ]
 
 
+@pytest.mark.parametrize("endpoint,operation", [
+    ("/index", lambda client: client.solutions()),
+    ("/models", lambda client: client.models()),
+    ("/info/catalog/group/first/1", lambda client: client.arguments(SOLUTION)),
+])
+def test_existing_empty_metadata_defaults_are_preserved(server, endpoint, operation):
+    server.routes[endpoint] = {}
+    assert operation(SolutionClient(server.url)) == []
+
+
 def test_delayed_server_keeps_gui_timer_running(app, widget, server):
     reply, started, release = hold(server.routes["/index"])
     server.routes["/index"] = reply
