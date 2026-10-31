@@ -10,8 +10,8 @@ if find_spec("cellcanvas_core") is None:
 import numpy as np
 import zarr
 from napari.components import ViewerModel
-from qtpy.QtCore import QTimer
-from qtpy.QtWidgets import QDialogButtonBox
+from qtpy.QtCore import QEvent, QTimer
+from qtpy.QtWidgets import QApplication, QDialogButtonBox
 
 import napari_cellcanvas._dataset as dataset_module
 import napari_cellcanvas.widget as widget_module
@@ -25,6 +25,10 @@ def host(app, wait_until):
     yield widget
     wait_until(lambda: not widget._dataset_loader.busy and not widget.local_controls.busy)
     widget.close()
+    # Destroy test-owned Qt objects on the GUI thread before later Dask work
+    # can trigger Python garbage collection on a worker thread.
+    widget.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 @pytest.fixture
