@@ -15,6 +15,7 @@ from qtpy.QtWidgets import QFormLayout
 from napari_cellcanvas._requests import RequestRunner
 from napari_cellcanvas._server import ServerError, SolutionClient
 from napari_cellcanvas.widget import CellCanvasWidget
+import napari_cellcanvas.widget as widget_module
 
 
 SOLUTION = "catalog:group:first:1"
@@ -180,6 +181,28 @@ def test_read_timeout_recovers_controls(app, widget, server):
     assert "timed out" in widget.status_label.text().lower()
     assert not widget.run_button.isEnabled()
     release.set()
+
+
+def test_project_switch_restores_controls_and_discards_old_index(app, widget, server, monkeypatch):
+    good = server.routes["/index"]
+    reply, started, release = hold(good)
+    server.routes["/index"] = reply
+    completions = []
+    widget._requests.completed.connect(lambda *args: completions.append(args))
+    widget.populate_solution_dropdown()
+    wait_for(app, started.is_set)
+    module = SimpleNamespace(from_file=lambda path: SimpleNamespace(runs=[]))
+    monkeypatch.setattr(widget_module, "import_module", lambda name: module)
+    assert widget.open_project("new-project.json")
+    assert widget.solution_dropdown.isEnabled()
+    assert widget.refresh_solutions_button.isEnabled()
+    release.set()
+    wait_for(app, lambda: any(result[0] == "solutions" for result in completions))
+    assert widget.solution_dropdown.count() == 0
+    assert widget.status_label.text() == "Opened new-project.json"
+    server.routes["/index"] = good
+    widget.populate_solution_dropdown()
+    wait_for(app, widget.run_button.isEnabled)
 
 
 def test_stale_arguments_do_not_replace_new_selection(app, widget, server):

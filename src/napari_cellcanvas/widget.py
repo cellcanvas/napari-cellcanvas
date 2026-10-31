@@ -530,6 +530,8 @@ class CellCanvasWidget(QWidget):
         self._args_ready = False
         self._loading_models = False
         self.last_solution_result = None
+        self.solution_dropdown.setEnabled(True)
+        self.refresh_solutions_button.setEnabled(self.root is not None or self.dataset_layers is not None)
         self._update_run_button()
 
     def _update_run_button(self):
