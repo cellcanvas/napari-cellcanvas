@@ -19,6 +19,12 @@ class DatasetLayers:
     painting: Labels
     prediction: Labels
 
+    def remove(self, viewer):
+        """Remove these layers while preserving unrelated viewer content."""
+        for layer in (*self.images, self.painting, self.prediction):
+            if layer in viewer.layers:
+                viewer.layers.remove(layer)
+
     def refresh_predictions(self):
         """Reload the displayed prediction slice after writes to storage."""
         self.prediction.refresh()
@@ -38,13 +44,25 @@ def add_dataset(viewer: ViewerModel, dataset: DataSet, *, name="CellCanvas") -> 
         "units": tuple(unit or "pixel" for unit in geometry.units),
     }
     image_data = da.asarray(dataset.image)
-    images = tuple(
-        viewer.add_image(image_data[channel], name=f"{name}: channel {channel}",
-                         rgb=False, blending="additive", **coordinates)
-        for channel in range(dataset.image.shape[0])
-    )
-    painting = viewer.add_labels(dataset.labels, name=f"{name}: painting", **coordinates)
-    prediction = viewer.add_labels(dataset.segmentation, name=f"{name}: prediction", **coordinates)
-    prediction.editable = False
-    viewer.layers.selection.active = painting
-    return DatasetLayers(images, painting, prediction)
+    added = []
+    selected = tuple(viewer.layers.selection)
+    active = viewer.layers.selection.active
+    try:
+        for channel in range(dataset.image.shape[0]):
+            added.append(viewer.add_image(image_data[channel], name=f"{name}: channel {channel}",
+                                          rgb=False, blending="additive", **coordinates))
+        images = tuple(added)
+        painting = viewer.add_labels(dataset.labels, name=f"{name}: painting", **coordinates)
+        added.append(painting)
+        prediction = viewer.add_labels(dataset.segmentation, name=f"{name}: prediction", **coordinates)
+        added.append(prediction)
+        prediction.editable = False
+        viewer.layers.selection.active = painting
+        return DatasetLayers(images, painting, prediction)
+    except Exception:
+        for layer in reversed(added):
+            viewer.layers.remove(layer)
+        viewer.layers.selection.clear()
+        viewer.layers.selection.update(selected)
+        viewer.layers.selection.active = active
+        raise

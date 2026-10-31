@@ -132,3 +132,49 @@ def test_refresh_reloads_project_without_contacting_server(widget, project):
     widget.refresh_button.click()
     assert widget.root is not previous
     assert widget.run_dropdown.currentText() == "run-one"
+
+
+def test_cancel_local_dataset_dialog_preserves_state(widget, monkeypatch):
+    from napari.components import ViewerModel
+    widget.viewer = ViewerModel()
+    widget._update_open_dataset_button()
+    dialog = Mock()
+    dialog.exec.return_value = 0
+    monkeypatch.setattr(widget_module, "LocalDatasetDialog", lambda parent: dialog)
+    widget.open_dataset_button.click()
+    assert widget.dataset_layers is None
+    assert not widget._dataset_loader.busy
+    dialog.options.assert_not_called()
+
+
+def test_local_dialog_requires_paths_and_separate_annotations(app, tmp_path):
+    from napari_cellcanvas._dataset import LocalDatasetDialog
+    from qtpy.QtWidgets import QDialogButtonBox
+    dialog = LocalDatasetDialog()
+    assert not dialog.buttons.button(QDialogButtonBox.Open).isEnabled()
+    assert not dialog.create_annotations.isChecked()
+    for field in dialog.paths.values():
+        field.setText(str(tmp_path / "same"))
+    assert dialog.buttons.button(QDialogButtonBox.Open).isEnabled()
+    dialog.accept()
+    assert dialog.result() == 0
+    assert "separate stores" in dialog.message.text()
+    dialog.paths["segmentation_path"].setText(str(tmp_path / "other"))
+    dialog.accept()
+    assert dialog.result() == 1
+    dialog.close()
+
+
+def test_missing_local_extra_has_useful_feedback(monkeypatch):
+    import builtins
+    from napari_cellcanvas._dataset import load_dataset
+    real_import = builtins.__import__
+
+    def without_core(name, *args, **kwargs):
+        if name.startswith("cellcanvas_core"):
+            raise ModuleNotFoundError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_core)
+    with pytest.raises(ImportError, match=r"napari-cellcanvas\[qt,local\]"):
+        load_dataset({})

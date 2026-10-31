@@ -4,7 +4,7 @@ from qtpy.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QComboBox, QLabel
                             QLineEdit, QFormLayout, QScrollArea, QTreeWidget, QTreeWidgetItem,
                             QHBoxLayout, QMenu, QSpinBox, QCheckBox, QListWidget,
                             QListWidgetItem)
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, Slot
 from qtpy.QtWidgets import QFileDialog
 from pathlib import Path
 from importlib import import_module
@@ -13,6 +13,7 @@ from napari.utils import DirectLabelColormap
 from ._server import SolutionClient
 from ._requests import RequestRunner
 from ._local import LocalSegmentationControls, default_manager
+from ._dataset import DatasetLoader, LocalDatasetDialog
 
 class MultiSelectComboBox(QComboBox):
     def __init__(self, parent=None):
@@ -68,7 +69,16 @@ class CellCanvasWidget(QWidget):
         self.status_label.setWordWrap(True)
         self.main_layout.addWidget(self.status_label)
         self.local_controls = LocalSegmentationControls(self)
+        self._dataset_loader = DatasetLoader(self)
+        self._dataset_loader.loaded.connect(self._dataset_loaded)
+        self._dataset_loader.failed.connect(self._dataset_failed)
+        self._dataset_loader.busy_changed.connect(self._dataset_loading_changed)
+        self.local_controls.busy_changed.connect(self._update_open_dataset_button)
+        self.open_dataset_button = QPushButton("Open Local Dataset", self)
+        self.open_dataset_button.clicked.connect(self.select_dataset)
+        self.main_layout.addWidget(self.open_dataset_button)
         self.main_layout.addWidget(self.local_controls)
+        self._update_open_dataset_button()
 
         # Add refresh button
         self.refresh_button = QPushButton("Refresh", self)
@@ -123,6 +133,11 @@ class CellCanvasWidget(QWidget):
 
     def add_dataset(self, dataset, *, name="CellCanvas", manager=None, trained=False):
         """Attach local layers and controls, optionally reusing a trained core manager."""
+        if self._dataset_loader.busy:
+            raise RuntimeError("Wait for the dataset to finish loading.")
+        return self._attach_dataset(dataset, name=name, manager=manager, trained=trained)
+
+    def _attach_dataset(self, dataset, *, name="CellCanvas", manager=None, trained=False):
         if self.viewer is None:
             raise ValueError("A napari viewer is required to display a dataset")
         if self.local_controls.busy:
@@ -130,11 +145,58 @@ class CellCanvasWidget(QWidget):
         if manager is None:
             manager = default_manager(dataset)
         from .layers import add_dataset
-        self.dataset_layers = add_dataset(self.viewer, dataset, name=name)
-        self.local_controls.set_dataset(dataset, self.dataset_layers, manager, name=name, trained=trained)
+        previous = self.dataset_layers
+        layers = add_dataset(self.viewer, dataset, name=name)
+        self.local_controls.set_dataset(dataset, layers, manager, name=name, trained=trained)
+        self.dataset_layers = layers
+        if previous is not None:
+            previous.remove(self.viewer)
         self._reset_request_context()
         self.status_label.setText(f"Loaded {name}")
         return self.dataset_layers
+
+    @Slot()
+    def select_dataset(self):
+        if not self.open_dataset_button.isEnabled():
+            return
+        dialog = LocalDatasetDialog(self)
+        if dialog.exec():
+            self.open_dataset(**dialog.options())
+        dialog.deleteLater()
+
+    def open_dataset(self, **options):
+        """Load core DataSet.from_paths options without blocking the GUI."""
+        if self.viewer is None:
+            self.status_label.setText("A napari viewer is required to display a dataset.")
+            return False
+        if self.local_controls.busy or self._dataset_loader.busy:
+            return False
+        self._dataset_name = Path(options.get("image_path", "CellCanvas")).name
+        self.status_label.setText("Loading local dataset...")
+        return self._dataset_loader.start(options)
+
+    @Slot(object)
+    def _dataset_loaded(self, result):
+        try:
+            dataset, manager = result
+            self._attach_dataset(dataset, name=self._dataset_name, manager=manager)
+        except Exception as error:
+            self._dataset_failed(error)
+
+    @Slot(object)
+    def _dataset_failed(self, error):
+        self.status_label.setText(f"Could not open local dataset: {error}")
+
+    @Slot(bool)
+    def _dataset_loading_changed(self, busy):
+        self.local_controls.setEnabled(not busy)
+        self._update_open_dataset_button()
+
+    @Slot()
+    def _update_open_dataset_button(self):
+        self.open_dataset_button.setEnabled(self.viewer is not None
+                                           and not self.local_controls.busy
+                                           and not self._dataset_loader.busy)
 
     def select_project(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -761,6 +823,7 @@ class CellCanvasWidget(QWidget):
                               loaded, failed, finished)
 
     def closeEvent(self, event):
+        self._dataset_loader.close()
         self._requests.close()
         super().closeEvent(event)
 
