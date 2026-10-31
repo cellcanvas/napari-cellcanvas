@@ -53,7 +53,10 @@ def project(tmp_path):
 def test_manifest_resolves_and_opens_widget(app):
     manifest = PluginManifest.from_file(str(files("napari_cellcanvas") / "napari.yaml"))
     manager = PluginManager()
-    manager.register(manifest)
+    try:
+        manager.get_manifest(manifest.name)
+    except KeyError:
+        manager.register(manifest)
     manager.activate(manifest.name)
     assert manifest.contributions.widgets[0].command == "napari-cellcanvas.make_widget"
     factory = manager.commands.get("napari-cellcanvas.make_widget")
