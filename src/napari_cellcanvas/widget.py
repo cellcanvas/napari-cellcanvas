@@ -8,9 +8,10 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QFileDialog
 from pathlib import Path
 from importlib import import_module
-import requests
 import zarr
 from napari.utils import DirectLabelColormap
+from ._server import SolutionClient
+from ._requests import RequestRunner
 
 class MultiSelectComboBox(QComboBox):
     def __init__(self, parent=None):
@@ -37,7 +38,7 @@ class MultiSelectComboBox(QComboBox):
         return ", ".join(self.selectedItems())
 
 class CellCanvasWidget(QWidget):
-    def __init__(self, viewer: napari.Viewer = None, copick_config_path=None, hostname="localhost", port=8082, parent=None):
+    def __init__(self, viewer: napari.Viewer = None, copick_config_path=None, hostname="localhost", port=8082, parent=None, request_timeout=(1.0, 10.0)):
         super().__init__(parent)
         self.viewer = viewer
         self.setWindowTitle("CellCanvas Widget")
@@ -50,6 +51,14 @@ class CellCanvasWidget(QWidget):
         self.root = None
         self._copick = None
         self.dataset_layers = None
+        self._requests = RequestRunner(self)
+        self._request_timeout = request_timeout
+        self._args_ready = False
+        self._loading_models = False
+        self._running_solution = False
+        self._form_generation = 0
+        self._context_generation = 0
+        self.last_solution_result = None
         
         self.open_project_button = QPushButton("Open Copick Project", self)
         self.open_project_button.clicked.connect(self.select_project)
@@ -104,6 +113,7 @@ class CellCanvasWidget(QWidget):
         self.main_layout.addWidget(self.run_button)
         
         self.solution_dropdown.currentIndexChanged.connect(self.update_solution_args)
+        self.run_dropdown.currentIndexChanged.connect(self.update_solution_args)
         self.populate_tree()
         if copick_config_path is not None:
             self.open_project(copick_config_path)
@@ -114,6 +124,7 @@ class CellCanvasWidget(QWidget):
             raise ValueError("A napari viewer is required to display a dataset")
         from .layers import add_dataset
         self.dataset_layers = add_dataset(self.viewer, dataset, name=name)
+        self._reset_request_context()
         self.status_label.setText(f"Loaded {name}")
         return self.dataset_layers
 
@@ -135,6 +146,7 @@ class CellCanvasWidget(QWidget):
         except Exception as error:
             self.status_label.setText(f"Could not open project: {error}")
             return False
+        self._reset_request_context()
         self._copick = module
         self.root = root
         self.copick_config_path = str(path)
@@ -509,48 +521,106 @@ class CellCanvasWidget(QWidget):
         if self.copick_config_path is not None:
             self.open_project(self.copick_config_path)
 
+    def _client(self):
+        return SolutionClient(f"http://{self.hostname}:{self.port}", self._request_timeout)
+
+    def _reset_request_context(self):
+        self._context_generation += 1
+        self._requests.invalidate("solutions", "arguments", "models")
+        self._args_ready = False
+        self._loading_models = False
+        self.last_solution_result = None
+        self._update_run_button()
+
+    def _update_run_button(self):
+        self.run_button.setEnabled(bool(self.solution_dropdown.currentText()) and
+                                   self._args_ready and not self._loading_models and
+                                   not self._running_solution)
+
+    def _show_request_error(self, error):
+        self.status_label.setText(str(error))
+
     def populate_solution_dropdown(self):
+        self._requests.invalidate("arguments", "models")
         self.solution_dropdown.clear()
-        try:
-            response = requests.get(f"http://{self.hostname}:{self.port}/index")
-            if response.status_code == 200:
-                index = response.json().get('index', {})
-                for solution_id, solution_info in index.items():
-                    self.solution_dropdown.addItem(f"{solution_info['catalog']}:{solution_info['group']}:{solution_info['name']}:{solution_info['version']}")
-        except Exception as e:
-            print(f"Error fetching solutions: {e}")
-        self.run_button.setEnabled(self.solution_dropdown.count() > 0)
+        self._args_ready = False
+        self._loading_models = False
+        self._update_run_button()
+        self.refresh_solutions_button.setEnabled(False)
+        self.solution_dropdown.setEnabled(False)
+        self.status_label.setText("Loading solutions...")
+
+        def loaded(solutions):
+            self.solution_dropdown.blockSignals(True)
+            self.solution_dropdown.addItems(solutions)
+            self.solution_dropdown.blockSignals(False)
+            if solutions:
+                self.update_solution_args()
+            else:
+                self.status_label.setText("The server has no solutions.")
+
+        def finished():
+            self.refresh_solutions_button.setEnabled(True)
+            self.solution_dropdown.setEnabled(True)
+            self._update_run_button()
+
+        self._requests.submit("solutions", self._client().solutions, loaded,
+                              self._show_request_error, finished)
 
     def populate_model_dropdown(self, combobox):
-        try:
-            response = requests.get(f"http://{self.hostname}:{self.port}/models")
-            if response.status_code == 200:
-                model_list = response.json().get('models', [])
-                for model_name in model_list:
-                    combobox.addItem(model_name)
-            else:
-                print(f"Failed to fetch models. Status code: {response.status_code}")
-        except Exception as e:
-            print(f"Error fetching models: {e}")
-            
+        self._loading_models = True
+        self._update_run_button()
+        self.status_label.setText("Loading models...")
+
+        def loaded(models):
+            combobox.clear()
+            combobox.addItems(models)
+            self._loading_models = False
+            self.status_label.setText("Solution ready.")
+            self._update_run_button()
+
+        def failed(error):
+            self._loading_models = False
+            self._args_ready = False
+            self._show_request_error(error)
+            self._update_run_button()
+
+        self._requests.submit("models", self._client().models, loaded, failed)
+
     def update_solution_args(self):
-        # Clear existing widgets
-        for i in reversed(range(self.scroll_layout.count())): 
-            widget = self.scroll_layout.itemAt(i).widget()
-            if widget is not None:
-                widget.deleteLater()  # Ensures the widget is fully cleaned up
-                self.scroll_layout.removeWidget(widget)
-
-        selected_run = self.run_dropdown.currentText()
+        self._form_generation += 1
+        self._requests.invalidate("arguments", "models")
+        self._args_ready = False
+        self._loading_models = False
+        self._update_run_button()
+        while self.scroll_layout.rowCount():
+            self.scroll_layout.removeRow(0)
         selected_solution = self.solution_dropdown.currentText()
-
-        default_value = ""
-        
+        selected_run = self.run_dropdown.currentText()
         if not selected_solution:
             return
+        self.status_label.setText("Loading solution arguments...")
 
+        def loaded(args):
+            self._args_ready = True
+            self._render_solution_args(args, selected_run, selected_solution)
+            if self._args_ready and not self._loading_models:
+                self.status_label.setText("Solution ready.")
+            self._update_run_button()
+
+        def failed(error):
+            self._args_ready = False
+            self._requests.invalidate("models")
+            self._loading_models = False
+            self._show_request_error(error)
+            self._update_run_button()
+
+        self._requests.submit("arguments", lambda client=self._client(): client.arguments(selected_solution),
+                              loaded, failed)
+
+    def _render_solution_args(self, args, selected_run, selected_solution):
         catalog, group, name, version = selected_solution.split(":")
-
+        default_value = ""
         # Define the conditions for freeform parameters
         freeform_conditions = {
             "cellcanvas": {
@@ -561,98 +631,89 @@ class CellCanvasWidget(QWidget):
             }
         }
 
-        try:
-            response = requests.get(f"http://{self.hostname}:{self.port}/info/{catalog}/{group}/{name}/{version}")
-            if response.status_code == 200:
-                solution_info = response.json().get('info', {})
-                args = solution_info.get('args', [])
+        for arg in args:
+            arg_name = arg.get('name')
 
-                for arg in args:
-                    arg_name = arg.get('name')
+            # Suppress copick_config_path argument
+            if arg_name == 'copick_config_path':
+                continue
 
-                    # Suppress copick_config_path argument
-                    if arg_name == 'copick_config_path':
-                        continue
+            label = QLabel(arg_name)
 
-                    label = QLabel(arg_name)
+            # Check if the argument should be freeform
+            if self.root is None and arg_name != 'model_path':
+                field = QLineEdit(str(default_value))
+            elif catalog in freeform_conditions and name in freeform_conditions[catalog] and arg_name in freeform_conditions[catalog][name]:
+                field = QLineEdit(str(default_value))
+            else:
+                if arg_name == 'run_name':
+                    field = QComboBox()
+                    for run in self.root.runs:
+                        field.addItem(run.meta.name)
+                    field.setCurrentText(selected_run)
+                elif arg_name == 'voxel_spacing':
+                    field = QComboBox()
+                    run = self.root.get_run(selected_run)
+                    for voxel_spacing in run.voxel_spacings:
+                        field.addItem(str(voxel_spacing.meta.voxel_size))
+                elif arg_name == 'tomo_type':
+                    field = QComboBox()
+                    run = self.root.get_run(selected_run)
+                    for tomogram in run.voxel_spacings[0].tomograms:
+                        field.addItem(tomogram.meta.tomo_type)
+                elif arg_name in ['embedding_name', 'feature_type', 'feature_names']:
+                    field = QComboBox()
+                    run = self.root.get_run(selected_run)
+                    for voxel_spacing in run.voxel_spacings:
+                        for tomogram in voxel_spacing.tomograms:
+                            for feature in tomogram.features:
+                                field.addItem(feature.meta.name)
+                elif arg_name == 'painting_segmentation_names':
+                    field = MultiSelectComboBox()
+                    run = self.root.get_run(selected_run)
+                    for voxel_spacing in run.voxel_spacings:
+                        for segmentation in voxel_spacing.run.get_segmentations(voxel_spacing.meta.voxel_size):
+                            field.addItem(segmentation.meta.name)
+                elif arg_name in ['train_run_names', 'val_run_names', 'run_names']:
+                    field = MultiSelectComboBox()
+                    for run in self.root.runs:
+                        field.addItem(run.meta.name)
+                elif arg_name == 'feature_types':
+                    field = MultiSelectComboBox()
+                    run = self.root.get_run(selected_run)
+                    for voxel_spacing in run.voxel_spacings:
+                        for tomogram in voxel_spacing.tomograms:
+                            for feature in tomogram.features:
+                                field.addItem(feature.meta.name)
+                elif arg_name in ['user_id', 'session_id']:
+                    field = QComboBox()
+                    for pick in self.root.runs[0].picks:  # Assuming all runs have similar user_ids and session_ids
+                        if arg_name == 'user_id':
+                            field.addItem(pick.meta.user_id)
+                        elif arg_name == 'session_id':
+                            field.addItem(pick.meta.session_id)
+                elif arg_name == 'model_path':
+                    field = QComboBox()
+                    self.populate_model_dropdown(field)
+                elif arg_name == 'segmentation_name':
+                    field = QComboBox()
+                    run = self.root.get_run(selected_run)
+                    for voxel_spacing in run.voxel_spacings:
+                        for segmentation in voxel_spacing.run.get_segmentations(voxel_spacing.meta.voxel_size):
+                            field.addItem(segmentation.meta.name)
+                else:
+                    field = QLineEdit(str(default_value))
 
-                    # Check if the argument should be freeform
-                    if catalog in freeform_conditions and name in freeform_conditions[catalog] and arg_name in freeform_conditions[catalog][name]:
-                        field = QLineEdit(str(default_value))
-                    else:
-                        if arg_name == 'run_name':
-                            field = QComboBox()
-                            for run in self.root.runs:
-                                field.addItem(run.meta.name)
-                            field.setCurrentText(selected_run)
-                        elif arg_name == 'voxel_spacing':
-                            field = QComboBox()
-                            run = self.root.get_run(selected_run)
-                            for voxel_spacing in run.voxel_spacings:
-                                field.addItem(str(voxel_spacing.meta.voxel_size))
-                        elif arg_name == 'tomo_type':
-                            field = QComboBox()
-                            run = self.root.get_run(selected_run)
-                            for tomogram in run.voxel_spacings[0].tomograms:
-                                field.addItem(tomogram.meta.tomo_type)
-                        elif arg_name in ['embedding_name', 'feature_type', 'feature_names']:
-                            field = QComboBox()
-                            run = self.root.get_run(selected_run)
-                            for voxel_spacing in run.voxel_spacings:
-                                for tomogram in voxel_spacing.tomograms:
-                                    for feature in tomogram.features:
-                                        field.addItem(feature.meta.name)
-                        elif arg_name == 'painting_segmentation_names':
-                            field = MultiSelectComboBox()
-                            run = self.root.get_run(selected_run)
-                            for voxel_spacing in run.voxel_spacings:
-                                for segmentation in voxel_spacing.run.get_segmentations(voxel_spacing.meta.voxel_size):
-                                    field.addItem(segmentation.meta.name)
-                        elif arg_name in ['train_run_names', 'val_run_names', 'run_names']:
-                            field = MultiSelectComboBox()
-                            for run in self.root.runs:
-                                field.addItem(run.meta.name)
-                        elif arg_name == 'feature_types':
-                            field = MultiSelectComboBox()
-                            run = self.root.get_run(selected_run)
-                            for voxel_spacing in run.voxel_spacings:
-                                for tomogram in voxel_spacing.tomograms:
-                                    for feature in tomogram.features:
-                                        field.addItem(feature.meta.name)
-                        elif arg_name in ['user_id', 'session_id']:
-                            field = QComboBox()
-                            for pick in self.root.runs[0].picks:  # Assuming all runs have similar user_ids and session_ids
-                                if arg_name == 'user_id':
-                                    field.addItem(pick.meta.user_id)
-                                elif arg_name == 'session_id':
-                                    field.addItem(pick.meta.session_id)
-                        elif arg_name == 'model_path':
-                            field = QComboBox()
-                            self.populate_model_dropdown(field)
-                        elif arg_name == 'segmentation_name':
-                            field = QComboBox()
-                            run = self.root.get_run(selected_run)
-                            for voxel_spacing in run.voxel_spacings:
-                                for segmentation in voxel_spacing.run.get_segmentations(voxel_spacing.meta.voxel_size):
-                                    field.addItem(segmentation.meta.name)
-                        else:
-                            field = QLineEdit(str(default_value))
+            self.scroll_layout.addRow(label, field)
 
-                    self.scroll_layout.addRow(label, field)
+        # Ensure the widgets are updated to avoid event filter issues
+        self.scroll_content.update()
 
-                # Ensure the widgets are updated to avoid event filter issues
-                self.scroll_content.update()
-        except Exception as e:
-            print(f"Error updating solution args: {e}")
-            
     def run_solution(self):
         selected_solution = self.solution_dropdown.currentText()
-        if not selected_solution:
+        if not selected_solution or not self._args_ready or self._running_solution:
             return
-
-        catalog, group, name, version = selected_solution.split(":")
         solution_args = {}
-        
         for i in range(self.scroll_layout.rowCount()):
             label_item = self.scroll_layout.itemAt(i * 2)
             field_item = self.scroll_layout.itemAt(i * 2 + 1)
@@ -664,17 +725,34 @@ class CellCanvasWidget(QWidget):
                 else:
                     solution_args[label.text()] = field.text()
         
-        try:
-            response = requests.post(f"http://{self.hostname}:{self.port}/run/{catalog}/{group}/{name}/{version}", 
-                                     json={"args": solution_args})
-            if response.status_code == 200:
-                result = response.json()
-                print(f"Execution result: {result}")
-            else:
-                print(f"Failed to execute solution. Status code: {response.status_code}")
-                print(f"Response content: {response.text}")
-        except Exception as e:
-            print(f"Error occurred: {e}")
+
+        self._running_solution = True
+        self._update_run_button()
+        self.status_label.setText("Running solution request...")
+        context = (self._context_generation, self._form_generation)
+
+        def current():
+            return context == (self._context_generation, self._form_generation)
+
+        def loaded(result):
+            if current():
+                self.last_solution_result = result
+                self.status_label.setText("Solution request succeeded.")
+
+        def failed(error):
+            if current():
+                self._show_request_error(error)
+
+        def finished():
+            self._running_solution = False
+            self._update_run_button()
+
+        self._requests.submit("run", lambda client=self._client(): client.run(selected_solution, solution_args),
+                              loaded, failed, finished)
+
+    def closeEvent(self, event):
+        self._requests.close()
+        super().closeEvent(event)
 
 def main():
     viewer = napari.Viewer()
