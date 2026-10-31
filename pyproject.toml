@@ -17,18 +17,23 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
-    "numpy",
+    "numpy>=2",
+    "napari>=0.9,<1",
+    "qtpy>=2.4",
+    "requests>=2.31",
+    "zarr>=2.16,<4",
 ]
 
 [project.optional-dependencies]
+qt = ["PySide6>=6.7,<7"]
+copick = ["copick>=1.31,<2"]
 testing = [
     "tox",
     "pytest",  # https://docs.pytest.org/en/latest/contents.html
@@ -39,10 +44,13 @@ testing = [
 napari-cellcanvas = "napari_cellcanvas:napari.yaml"
 
 [project.urls]
-"Bug Tracker" = "https://github.com/kephale/napari-cellcanvas/issues"
-"Documentation" = "https://github.com/kephale/napari-cellcanvas#README.md"
-"Source Code" = "https://github.com/kephale/napari-cellcanvas"
-"User Support" = "https://github.com/kephale/napari-cellcanvas/issues"
+"Bug Tracker" = "https://github.com/cellcanvas/napari-cellcanvas/issues"
+"Documentation" = "https://github.com/cellcanvas/napari-cellcanvas#README.md"
+"Source Code" = "https://github.com/cellcanvas/napari-cellcanvas"
+"User Support" = "https://github.com/cellcanvas/napari-cellcanvas/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["setuptools>=42.0.0", "wheel"]

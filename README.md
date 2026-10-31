@@ -1,9 +1,9 @@
 # napari-cellcanvas
 
-[![License MIT](https://img.shields.io/pypi/l/napari-cellcanvas.svg?color=green)](https://github.com/kephale/napari-cellcanvas/raw/main/LICENSE)
+[![License MIT](https://img.shields.io/pypi/l/napari-cellcanvas.svg?color=green)](https://github.com/cellcanvas/napari-cellcanvas/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/napari-cellcanvas.svg?color=green)](https://pypi.org/project/napari-cellcanvas)
 [![Python Version](https://img.shields.io/pypi/pyversions/napari-cellcanvas.svg?color=green)](https://python.org)
-[![tests](https://github.com/kephale/napari-cellcanvas/workflows/tests/badge.svg)](https://github.com/kephale/napari-cellcanvas/actions)
+[![tests](https://github.com/cellcanvas/napari-cellcanvas/workflows/tests/badge.svg)](https://github.com/cellcanvas/napari-cellcanvas/actions)
 [![codecov](https://codecov.io/gh/kephale/napari-cellcanvas/branch/main/graph/badge.svg)](https://codecov.io/gh/kephale/napari-cellcanvas)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-cellcanvas)](https://napari-hub.org/plugins/napari-cellcanvas)
 
@@ -25,14 +25,17 @@ https://napari.org/stable/plugins/index.html
 
 You can install `napari-cellcanvas` via [pip]:
 
-    pip install napari-cellcanvas
+    pip install 'napari-cellcanvas[qt]'
 
 
 
 To install latest development version :
 
-    pip install git+https://github.com/kephale/napari-cellcanvas.git
+    pip install 'napari-cellcanvas[qt] @ git+https://github.com/cellcanvas/napari-cellcanvas.git'
 
+
+Requires Python 3.11+. Open CellCanvas from the napari plugin menu.
+Copick browsing uses `[qt,copick]` in a separate Zarr 2 environment.
 
 ## Contributing
 
@@ -59,7 +62,7 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [Mozilla Public License 2.0]: https://www.mozilla.org/media/MPL/2.0/index.txt
 [cookiecutter-napari-plugin]: https://github.com/napari/cookiecutter-napari-plugin
 
-[file an issue]: https://github.com/kephale/napari-cellcanvas/issues
+[file an issue]: https://github.com/cellcanvas/napari-cellcanvas/issues
 
 [napari]: https://github.com/napari/napari
 [tox]: https://tox.readthedocs.io/en/latest/

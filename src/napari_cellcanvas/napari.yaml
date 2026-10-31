@@ -6,3 +6,9 @@ visibility: public
 categories: ["Annotation", "Segmentation", "Acquisition"]
 contributions:
   commands:
+    - id: napari-cellcanvas.make_widget
+      title: Open CellCanvas
+      python_name: napari_cellcanvas.widget:CellCanvasWidget
+  widgets:
+    - command: napari-cellcanvas.make_widget
+      display_name: CellCanvas

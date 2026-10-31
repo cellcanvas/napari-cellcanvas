@@ -2,11 +2,13 @@ import napari
 import numpy as np
 from qtpy.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QComboBox, QLabel, 
                             QLineEdit, QFormLayout, QScrollArea, QTreeWidget, QTreeWidgetItem,
-                            QHBoxLayout, QMenu, QAction, QSpinBox, QCheckBox, QListWidget,
+                            QHBoxLayout, QMenu, QSpinBox, QCheckBox, QListWidget,
                             QListWidgetItem)
 from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QFileDialog
+from pathlib import Path
+from importlib import import_module
 import requests
-import copick
 import zarr
 from napari.utils import DirectLabelColormap
 
@@ -35,22 +37,30 @@ class MultiSelectComboBox(QComboBox):
         return ", ".join(self.selectedItems())
 
 class CellCanvasWidget(QWidget):
-    def __init__(self, viewer=None, copick_config_path="/Users/kharrington/Data/copick/cellcanvas_server/local_sshOverlay_localStatic.json", hostname="localhost", port=8082, parent=None):
+    def __init__(self, viewer: napari.Viewer = None, copick_config_path=None, hostname="localhost", port=8082, parent=None):
         super().__init__(parent)
         self.viewer = viewer
         self.setWindowTitle("CellCanvas Widget")
         self.hostname = hostname
         self.port = port
         self.copick_config_path = copick_config_path
-        self.layout = QVBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
         
         # Load Copick project
-        self.root = copick.from_file(self.copick_config_path)
+        self.root = None
+        self._copick = None
         
+        self.open_project_button = QPushButton("Open Copick Project", self)
+        self.open_project_button.clicked.connect(self.select_project)
+        self.main_layout.addWidget(self.open_project_button)
+        self.status_label = QLabel("Open a project to browse its data.", self)
+        self.status_label.setWordWrap(True)
+        self.main_layout.addWidget(self.status_label)
+
         # Add refresh button
         self.refresh_button = QPushButton("Refresh", self)
         self.refresh_button.clicked.connect(self.refresh_tree)
-        self.layout.addWidget(self.refresh_button)
+        self.main_layout.addWidget(self.refresh_button)
         
         # Hierarchical tree view
         self.tree_view = QTreeWidget()
@@ -61,19 +71,22 @@ class CellCanvasWidget(QWidget):
         self.tree_view.customContextMenuRequested.connect(
             self.open_context_menu
         )
-        self.layout.addWidget(self.tree_view)
+        self.main_layout.addWidget(self.tree_view)
 
         # Run selection dropdown
         self.run_dropdown = QComboBox(self)
-        self.layout.addWidget(QLabel("Select Run:"))
-        self.layout.addWidget(self.run_dropdown)
+        self.main_layout.addWidget(QLabel("Select Run:"))
+        self.main_layout.addWidget(self.run_dropdown)
         self.populate_run_dropdown()
         
         # Solution selection dropdown
         self.solution_dropdown = QComboBox(self)
-        self.layout.addWidget(QLabel("Select Solution:"))
-        self.layout.addWidget(self.solution_dropdown)
-        self.populate_solution_dropdown()
+        self.main_layout.addWidget(QLabel("Select Solution:"))
+        self.main_layout.addWidget(self.solution_dropdown)
+        self.refresh_solutions_button = QPushButton("Refresh Solutions", self)
+        self.refresh_solutions_button.clicked.connect(self.populate_solution_dropdown)
+        self.refresh_solutions_button.setEnabled(False)
+        self.main_layout.addWidget(self.refresh_solutions_button)
         
         # Scroll area for solution arguments
         self.scroll_area = QScrollArea(self)
@@ -81,34 +94,69 @@ class CellCanvasWidget(QWidget):
         self.scroll_content = QWidget()
         self.scroll_layout = QFormLayout(self.scroll_content)
         self.scroll_area.setWidget(self.scroll_content)
-        self.layout.addWidget(self.scroll_area)
+        self.main_layout.addWidget(self.scroll_area)
         
         # Run solution button
         self.run_button = QPushButton("Run Solution", self)
         self.run_button.clicked.connect(self.run_solution)
-        self.layout.addWidget(self.run_button)
+        self.run_button.setEnabled(False)
+        self.main_layout.addWidget(self.run_button)
         
-        self.setLayout(self.layout)
         self.solution_dropdown.currentIndexChanged.connect(self.update_solution_args)
         self.populate_tree()
+        if copick_config_path is not None:
+            self.open_project(copick_config_path)
 
-    def populate_run_dropdown(self):
+    def select_project(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Copick project", "", "JSON projects (*.json);;All files (*)"
+        )
+        if path:
+            self.open_project(path)
+
+    def open_project(self, path):
+        try:
+            module = import_module("copick")
+            root = module.from_file(str(path))
+            runs = list(root.runs)
+        except ImportError:
+            self.status_label.setText("Copick browsing requires napari-cellcanvas[copick] in a separate Zarr 2 environment.")
+            return False
+        except Exception as error:
+            self.status_label.setText(f"Could not open project: {error}")
+            return False
+        self._copick = module
+        self.root = root
+        self.copick_config_path = str(path)
+        self.solution_dropdown.clear()
+        self.run_button.setEnabled(False)
+        self.populate_run_dropdown(runs)
+        self.populate_tree(runs)
+        self.refresh_solutions_button.setEnabled(True)
+        self.status_label.setText(f"Opened {Path(path).name}")
+        return True
+
+    def populate_run_dropdown(self, runs=None):
         self.run_dropdown.clear()
-        for run in self.root.runs:
+        if self.root is None:
+            return
+        for run in self.root.runs if runs is None else runs:
             self.run_dropdown.addItem(run.meta.name)        
 
-    def populate_tree(self):
+    def populate_tree(self, runs=None):
         self.tree_view.clear()
-        for run in self.root.runs:
+        if self.root is None:
+            return
+        for run in self.root.runs if runs is None else runs:
             run_item = QTreeWidgetItem(self.tree_view, [run.meta.name])
             run_item.setData(0, Qt.UserRole, run)
             run_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
 
     def handle_item_expand(self, item):
         data = item.data(0, Qt.UserRole)
-        if isinstance(data, copick.models.CopickRun):
+        if isinstance(data, self._copick.models.CopickRun):
             self.expand_run(item, data)
-        elif isinstance(data, copick.models.CopickVoxelSpacing):
+        elif isinstance(data, self._copick.models.CopickVoxelSpacing):
             self.expand_voxel_spacing(item, data)
 
     def expand_run(self, item, run):
@@ -169,24 +217,24 @@ class CellCanvasWidget(QWidget):
 
     def handle_item_click(self, item, column):
         data = item.data(0, Qt.UserRole)
-        if isinstance(data, copick.models.CopickRun):
+        if isinstance(data, self._copick.models.CopickRun):
             # self.info_label.setText(f"Run: {data.meta.name}")
             self.selected_run = data
-        elif isinstance(data, copick.models.CopickVoxelSpacing):
+        elif isinstance(data, self._copick.models.CopickVoxelSpacing):
             # self.info_label.setText(f"Voxel Spacing: {data.meta.voxel_size}")
             self.lazy_load_voxel_spacing(item, data)
-        elif isinstance(data, copick.models.CopickTomogram):
+        elif isinstance(data, self._copick.models.CopickTomogram):
             self.load_tomogram(data)
-        elif isinstance(data, copick.models.CopickSegmentation):
+        elif isinstance(data, self._copick.models.CopickSegmentation):
             self.load_segmentation(data)
-        elif isinstance(data, copick.models.CopickPicks):
+        elif isinstance(data, self._copick.models.CopickPicks):
             parent_run = self.get_parent_run(item)
             self.load_picks(data, parent_run)
 
     def get_parent_run(self, item):
         while item:
             data = item.data(0, Qt.UserRole)
-            if isinstance(data, copick.models.CopickRun):
+            if isinstance(data, self._copick.models.CopickRun):
                 return data
             item = item.parent()
         return None
@@ -448,8 +496,8 @@ class CellCanvasWidget(QWidget):
         widget.close()
 
     def refresh_tree(self):
-        self.root = copick.from_file(self.copick_config_path)
-        self.populate_tree()
+        if self.copick_config_path is not None:
+            self.open_project(self.copick_config_path)
 
     def populate_solution_dropdown(self):
         self.solution_dropdown.clear()
@@ -461,6 +509,7 @@ class CellCanvasWidget(QWidget):
                     self.solution_dropdown.addItem(f"{solution_info['catalog']}:{solution_info['group']}:{solution_info['name']}:{solution_info['version']}")
         except Exception as e:
             print(f"Error fetching solutions: {e}")
+        self.run_button.setEnabled(self.solution_dropdown.count() > 0)
 
     def populate_model_dropdown(self, combobox):
         try:
