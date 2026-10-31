@@ -37,6 +37,8 @@ To install latest development version :
 Requires Python 3.11+. Open CellCanvas from the napari plugin menu.
 For local Zarr 3 datasets, install `[qt,local]` and choose **Open Local Dataset**.
 Select image, feature, painting and prediction stores, then **Train** and **Predict and Save**.
+Use **Connect to Service** to select the registered dataset on a local core service using the same Zarr stores.
+After a timeout, **Check Service Status** keeps painting locked until the operation is confirmed finished.
 Copick browsing uses `[qt,copick]` in a separate Zarr 2 environment.
 
 ## Contributing
