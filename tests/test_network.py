@@ -8,6 +8,7 @@ from threading import Event, Thread, get_ident
 from types import SimpleNamespace
 
 import pytest
+import requests
 from qtpy.QtCore import QThread, QTimer
 from qtpy.QtWidgets import QFormLayout
 
@@ -146,17 +147,27 @@ def test_server_errors_are_visible_and_retry_recovers(app, widget, server, respo
     wait_for(app, widget.run_button.isEnabled)
 
 
-def test_connection_refusal_recovers(app, widget, server):
+def test_unreachable_server_recovers(app, widget, server):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         widget.port = sock.getsockname()[1]
     widget.populate_solution_dropdown()
     wait_for(app, widget.refresh_solutions_button.isEnabled)
-    assert "connect" in widget.status_label.text().lower()
+    # Windows may reach the connect timeout before reporting a refused port.
+    assert any(word in widget.status_label.text().lower() for word in ("connect", "timed out"))
     assert not widget.run_button.isEnabled()
     widget.port = server.port
     widget.populate_solution_dropdown()
     wait_for(app, widget.run_button.isEnabled)
+
+
+def test_refused_connection_has_clear_error(monkeypatch):
+    def refuse(*args, **kwargs):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(requests, "get", refuse)
+    with pytest.raises(ServerError, match="connect"):
+        SolutionClient("http://127.0.0.1:1").solutions()
 
 
 def test_read_timeout_recovers_controls(app, widget, server):
