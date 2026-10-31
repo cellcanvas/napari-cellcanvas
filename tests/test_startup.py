@@ -147,10 +147,21 @@ def test_cancel_local_dataset_dialog_preserves_state(widget, monkeypatch):
     dialog.options.assert_not_called()
 
 
-def test_local_dialog_requires_paths_and_separate_annotations(app, tmp_path):
+@pytest.fixture
+def local_dataset_dialog(app):
     from napari_cellcanvas._dataset import LocalDatasetDialog
-    from qtpy.QtWidgets import QDialogButtonBox
+    from qtpy.QtCore import QEvent
+    from qtpy.QtWidgets import QApplication
     dialog = LocalDatasetDialog()
+    yield dialog
+    dialog.close()
+    dialog.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_local_dialog_requires_paths_and_separate_annotations(local_dataset_dialog, tmp_path):
+    from qtpy.QtWidgets import QDialogButtonBox
+    dialog = local_dataset_dialog
     assert not dialog.buttons.button(QDialogButtonBox.Open).isEnabled()
     assert not dialog.create_annotations.isChecked()
     for field in dialog.paths.values():
@@ -162,7 +173,6 @@ def test_local_dialog_requires_paths_and_separate_annotations(app, tmp_path):
     dialog.paths["segmentation_path"].setText(str(tmp_path / "other"))
     dialog.accept()
     assert dialog.result() == 1
-    dialog.close()
 
 
 def test_missing_local_extra_has_useful_feedback(monkeypatch):
