@@ -35,8 +35,8 @@ To install latest development version :
 
 
 Requires Python 3.11+. Open CellCanvas from the napari plugin menu.
-For local Zarr 3 datasets, install `[qt,local]` and call `widget.add_dataset(dataset)`.
-Use **Train** and **Predict and Save** on the attached dataset.
+For local Zarr 3 datasets, install `[qt,local]` and choose **Open Local Dataset**.
+Select image, feature, painting and prediction stores, then **Train** and **Predict and Save**.
 Copick browsing uses `[qt,copick]` in a separate Zarr 2 environment.
 
 ## Contributing

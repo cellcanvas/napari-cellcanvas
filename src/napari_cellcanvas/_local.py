@@ -1,6 +1,6 @@
 """Qt controls that delegate local segmentation to a headless core manager."""
 
-from qtpy.QtCore import QObject, Qt, Slot
+from qtpy.QtCore import QObject, Qt, Signal, Slot
 from qtpy.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 from superqt.utils import create_worker
 
@@ -48,6 +48,8 @@ class _LayerGuard(QObject):
 
 
 class LocalSegmentationControls(QGroupBox):
+    busy_changed = Signal(bool)
+
     def __init__(self, parent=None):
         super().__init__("Local Segmentation", parent)
         layout = QVBoxLayout(self)
@@ -98,6 +100,7 @@ class LocalSegmentationControls(QGroupBox):
 
     def _start(self, operation, work):
         self.busy = True
+        self.busy_changed.emit(True)
         self._operation = operation
         self._update_buttons()
         self.status_label.setText(f"{operation}...")
@@ -137,3 +140,4 @@ class LocalSegmentationControls(QGroupBox):
         self.busy = False
         self._worker = None
         self._update_buttons()
+        self.busy_changed.emit(False)
