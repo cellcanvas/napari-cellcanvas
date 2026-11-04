@@ -34,6 +34,7 @@ dependencies = [
 [project.optional-dependencies]
 qt = ["PySide6>=6.7,<7"]
 copick = ["copick>=1.31,<2"]
+local = ["cellcanvas-core @ git+https://github.com/cellcanvas/cellcanvas-core.git@3095532cf6d5b13e73e55ec08c2e2d9bc95b1645"]
 testing = [
     "tox",
     "pytest",  # https://docs.pytest.org/en/latest/contents.html

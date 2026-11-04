@@ -49,6 +49,7 @@ class CellCanvasWidget(QWidget):
         # Load Copick project
         self.root = None
         self._copick = None
+        self.dataset_layers = None
         
         self.open_project_button = QPushButton("Open Copick Project", self)
         self.open_project_button.clicked.connect(self.select_project)
@@ -106,6 +107,15 @@ class CellCanvasWidget(QWidget):
         self.populate_tree()
         if copick_config_path is not None:
             self.open_project(copick_config_path)
+
+    def add_dataset(self, dataset, *, name="CellCanvas"):
+        """Add a local core dataset to this widget's napari viewer."""
+        if self.viewer is None:
+            raise ValueError("A napari viewer is required to display a dataset")
+        from .layers import add_dataset
+        self.dataset_layers = add_dataset(self.viewer, dataset, name=name)
+        self.status_label.setText(f"Loaded {name}")
+        return self.dataset_layers
 
     def select_project(self):
         path, _ = QFileDialog.getOpenFileName(
