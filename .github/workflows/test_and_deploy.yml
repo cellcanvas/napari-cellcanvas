@@ -89,7 +89,7 @@ jobs:
         with:
           python-version: "3.11"
       - uses: tlambert03/setup-qt-libs@v1
-      - run: python -m pip install '.[qt,local,testing]'
+      - run: python -m pip install '.[qt,local,testing,service-testing]'
       - run: python -m pytest -q
 
   deploy:
