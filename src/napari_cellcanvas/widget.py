@@ -12,6 +12,7 @@ import zarr
 from napari.utils import DirectLabelColormap
 from ._server import SolutionClient
 from ._requests import RequestRunner
+from ._local import LocalSegmentationControls, default_manager
 
 class MultiSelectComboBox(QComboBox):
     def __init__(self, parent=None):
@@ -66,6 +67,8 @@ class CellCanvasWidget(QWidget):
         self.status_label = QLabel("Open a project to browse its data.", self)
         self.status_label.setWordWrap(True)
         self.main_layout.addWidget(self.status_label)
+        self.local_controls = LocalSegmentationControls(self)
+        self.main_layout.addWidget(self.local_controls)
 
         # Add refresh button
         self.refresh_button = QPushButton("Refresh", self)
@@ -118,12 +121,17 @@ class CellCanvasWidget(QWidget):
         if copick_config_path is not None:
             self.open_project(copick_config_path)
 
-    def add_dataset(self, dataset, *, name="CellCanvas"):
-        """Add a local core dataset to this widget's napari viewer."""
+    def add_dataset(self, dataset, *, name="CellCanvas", manager=None, trained=False):
+        """Attach local layers and controls, optionally reusing a trained core manager."""
         if self.viewer is None:
             raise ValueError("A napari viewer is required to display a dataset")
+        if self.local_controls.busy:
+            raise RuntimeError("Wait for the current local operation to finish.")
+        if manager is None:
+            manager = default_manager(dataset)
         from .layers import add_dataset
         self.dataset_layers = add_dataset(self.viewer, dataset, name=name)
+        self.local_controls.set_dataset(dataset, self.dataset_layers, manager, name=name, trained=trained)
         self._reset_request_context()
         self.status_label.setText(f"Loaded {name}")
         return self.dataset_layers
