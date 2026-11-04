@@ -35,8 +35,8 @@ dependencies = [
 [project.optional-dependencies]
 qt = ["PySide6>=6.7,<7"]
 copick = ["copick>=1.31,<2"]
-local = ["cellcanvas-core @ git+https://github.com/cellcanvas/cellcanvas-core.git@3095532cf6d5b13e73e55ec08c2e2d9bc95b1645"]
-service-testing = ["cellcanvas[service] @ git+https://github.com/cellcanvas/cellcanvas.git@238e26dc398633ca8524edc347f1c50f60f91738"]
+local = ["cellcanvas-core @ git+https://github.com/cellcanvas/cellcanvas-core.git@e7947172d8160d060fe27f47503b67b510af13db"]
+service-testing = ["cellcanvas[service] @ git+https://github.com/cellcanvas/cellcanvas.git@4c5a355bcb1af44f6e8023a994858205d08f3e4e"]
 testing = [
     "tox",
     "pytest",  # https://docs.pytest.org/en/latest/contents.html
